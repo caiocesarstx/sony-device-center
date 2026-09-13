@@ -62,6 +62,7 @@ void DeviceCenterController::_applySnapshot(const QByteArray& data) {
     const auto s = QJsonDocument::fromJson(data).object();
     _connected = s.value("connected").toBool();
     _connectionState = s.value("connectionState").toString("disconnected");
+    _maxAmbientLevel = s.value("maxAmbientLevel").toInt(20);
     if (s.contains("name")) _deviceName = s.value("name").toString();
     if (s.contains("address")) _deviceAddress = s.value("address").toString();
     if (!s.contains("features")) {
@@ -96,6 +97,7 @@ int DeviceCenterController::batteryLevel() const { return _batteryLevel; }
 bool DeviceCenterController::isCharging() const { return _isCharging; }
 QString DeviceCenterController::noiseControlMode() const { return _noiseControlMode; }
 int DeviceCenterController::ambientLevel() const { return _ambientLevel; }
+int DeviceCenterController::maxAmbientLevel() const { return _maxAmbientLevel; }
 bool DeviceCenterController::focusOnVoice() const { return _focusOnVoice; }
 int DeviceCenterController::equalizerPreset() const { return _equalizerPreset; }
 QString DeviceCenterController::equalizerPresetName() const { return _equalizerPresetName; }

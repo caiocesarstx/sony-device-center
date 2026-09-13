@@ -1289,7 +1289,7 @@ ApplicationWindow {
                             NeoSlider {
                                 id: ambientSlider
                                 Layout.fillWidth: true
-                                from: 1; to: 20; stepSize: 1
+                                from: 1; to: controller.maxAmbientLevel; stepSize: 1
                                 confirmedValue: controller.ambientLevel
                                 onMoved: controller.setAmbient(Math.round(value), voiceSwitch.checked)
                             }

@@ -97,11 +97,24 @@ TEST_CASE("Structured snapshots are escaped versioned and truthful", "[core][jso
     CHECK(snapshot["equalizer"]["bands"] == Json::array({1,2,3,4,5}));
     CHECK(snapshot["features"]["noiseControl"]["availability"] == "valid");
     CHECK(snapshot["codec"] == "Unknown");
+    CHECK(snapshot["maxAmbientLevel"] == 20);
     CHECK(JsonProtocol::execute({{"version",1},{"id",1},{"method","ambient"},{"params",{{"level",21}}}},service)["error"]["code"] == "InvalidRequest");
     service.disconnect();
     CHECK(JsonProtocol::snapshot(service)["features"]["noiseControl"]["availability"] == "stale");
     auto status = IpcProtocol::execute(IpcProtocol::parseCommand("status"),service);
     CHECK_FALSE(status.success); CHECK(status.message == "Device disconnected");
+}
+
+TEST_CASE("V1 ambient control rejects the V2-only level 20", "[core][json][v1]") {
+    auto transport = std::make_shared<ReplyTransport>();
+    DeviceService service(transport);
+    service.connect(DeviceAddress("11:22:33:44:55:66"), "WH-1000XM4");
+
+    const auto snapshot = JsonProtocol::snapshot(service);
+    CHECK(snapshot["maxAmbientLevel"] == 19);
+    const auto response = JsonProtocol::execute(
+        {{"version", 1}, {"id", 1}, {"method", "ambient"}, {"params", {{"level", 20}}}}, service);
+    CHECK(response["error"]["code"] == "InvalidRequest");
 }
 TEST_CASE("Notification callbacks may read state from another thread", "[core][events]") {
     auto transport = std::make_shared<ReplyTransport>();
