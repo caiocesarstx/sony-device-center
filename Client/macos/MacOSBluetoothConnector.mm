@@ -24,14 +24,16 @@ MacOSBluetoothConnector::~MacOSBluetoothConnector()
 #ifdef SHC_DEBUG_PROTOCOL
     fprintf(stderr, "[connect] rfcommChannelClosed\n");
 #endif
+    delegateCPP->channelOpenComplete(kIOReturnError);
     delegateCPP->disconnect();
 }
 
-#ifdef SHC_DEBUG_PROTOCOL
 - (void)rfcommChannelOpenComplete:(IOBluetoothRFCOMMChannel *)rfcommChannel status:(IOReturn)error {
+#ifdef SHC_DEBUG_PROTOCOL
     fprintf(stderr, "[connect] rfcommChannelOpenComplete status=0x%x\n", error);
-}
 #endif
+    delegateCPP->channelOpenComplete(error);
+}
 
 -(void)rfcommChannelData:(IOBluetoothRFCOMMChannel *)rfcommChannel data:(void *)dataPointer length:(size_t)dataLength
 {
@@ -74,7 +76,7 @@ void MacOSBluetoothConnector::connectToMac(MacOSBluetoothConnector* macOSBluetoo
     // get device
     IOBluetoothDevice *device = (__bridge IOBluetoothDevice *)macOSBluetoothConnector->rfcommDevice;
     // create new channel
-    IOBluetoothRFCOMMChannel *channel = [[IOBluetoothRFCOMMChannel alloc] init];
+    IOBluetoothRFCOMMChannel *channel = nil;
 
     // try the v1 service UUID first, then fall back to the v2 (newer-generation) UUID.
     IOBluetoothSDPUUID *sppServiceUUIDV1 = [IOBluetoothSDPUUID uuidWithBytes:(void*)SERVICE_UUID_IN_BYTES length: 16];
@@ -115,7 +117,13 @@ void MacOSBluetoothConnector::connectToMac(MacOSBluetoothConnector* macOSBluetoo
     // setup delegate
     AsyncCommDelegate* asyncCommDelegate = [[AsyncCommDelegate alloc] init];
     asyncCommDelegate->delegateCPP = macOSBluetoothConnector;
-    // try to open channel
+    {
+        std::lock_guard lock(macOSBluetoothConnector->channelOpenMutex);
+        macOSBluetoothConnector->channelOpenFinished = false;
+        macOSBluetoothConnector->channelOpenStatus = kIOReturnError;
+    }
+    // Async opening lets IOBluetooth complete the baseband/RFCOMM handshake.
+    // Wait for its callback before allowing the protocol session to start.
     IOReturn openResult = [device openRFCOMMChannelAsync:&channel withChannelID:rfcommChannelID delegate:asyncCommDelegate];
 #ifdef SHC_DEBUG_PROTOCOL
     fprintf(stderr, "[connect] openRFCOMMChannelAsync -> 0x%x\n", openResult);
@@ -126,8 +134,23 @@ void MacOSBluetoothConnector::connectToMac(MacOSBluetoothConnector* macOSBluetoo
         connectPromise.set_exception(excPtr);
         return;
     }
-    // store the channel
+    // Keep the retained channel available for cleanup if the callback times out
+    // or reports an error.
     macOSBluetoothConnector->rfcommchannel = (__bridge void*) channel;
+    {
+        std::unique_lock lock(macOSBluetoothConnector->channelOpenMutex);
+        if (!macOSBluetoothConnector->channelOpenConditionVariable.wait_for(
+                lock, std::chrono::seconds(20), [&] { return macOSBluetoothConnector->channelOpenFinished; })) {
+            RecoverableException exc("Timed out opening the rfcomm.", false);
+            connectPromise.set_exception(std::make_exception_ptr(exc));
+            return;
+        }
+        if (macOSBluetoothConnector->channelOpenStatus != kIOReturnSuccess) {
+            RecoverableException exc("Could not open the rfcomm.", false);
+            connectPromise.set_exception(std::make_exception_ptr(exc));
+            return;
+        }
+    }
     macOSBluetoothConnector->protocolVersion = protocolVersion;
 
     macOSBluetoothConnector->running = true;
@@ -228,6 +251,8 @@ std::vector<BluetoothDevice> MacOSBluetoothConnector::getConnectedDevices()
 
 void MacOSBluetoothConnector::disconnect() noexcept
 {
+    // Wake a worker waiting for an RFCOMM callback before joining it.
+    channelOpenComplete(kIOReturnError);
     // close connection
     closeConnection();
     running = false;
@@ -254,4 +279,12 @@ bool MacOSBluetoothConnector::isConnected() noexcept
         return false;
     IOBluetoothRFCOMMChannel *chan = (__bridge IOBluetoothRFCOMMChannel*) rfcommchannel;
     return chan.isOpen;
+}
+
+void MacOSBluetoothConnector::channelOpenComplete(IOReturn status) noexcept
+{
+    std::lock_guard lock(channelOpenMutex);
+    channelOpenStatus = status;
+    channelOpenFinished = true;
+    channelOpenConditionVariable.notify_one();
 }
