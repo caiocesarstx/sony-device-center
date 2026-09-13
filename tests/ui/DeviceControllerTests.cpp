@@ -59,6 +59,23 @@ private slots:
         QTRY_COMPARE_WITH_TIMEOUT(controller.noiseControlMode(),QString("ambient"),1000);
         QCOMPARE(controller.ambientLevel(),12);
     }
+    void ambientUsesV1MaximumWhenDeviceReportsLevel20() {
+        auto transport = std::make_shared<ReplyTransport>();
+        auto service = std::make_shared<core::DeviceService>(transport);
+        service->connect(transport::DeviceAddress("11:22:33:44:55:66"),"WH-1000XM4");
+        transport->queueIncoming(sony::protocol::FrameCodec::encode({sony::protocol::DataType::Ack, 0, {}}));
+        service->activeDevice()->setAmbient(20, false);
+
+        DeviceCenterController controller(nullptr, service);
+        QTRY_COMPARE_WITH_TIMEOUT(controller.ambientLevel(), 20, 2000);
+        const auto sentBefore = transport->sentCount();
+        controller.setAmbient(controller.ambientLevel(), false);
+        QTRY_VERIFY_WITH_TIMEOUT(!controller.busy(), 2000);
+        QCOMPARE(controller.lastError(), QString());
+        QCOMPARE(transport->sentCount(), sentBefore + 1);
+        const auto frame = sony::protocol::FrameCodec::decode(transport->lastSentFrame());
+        QCOMPARE(frame.payload.back(), static_cast<uint8_t>(19));
+    }
     void destructionDrainsWorkerAndCallbacks() {
         auto service = std::make_shared<SlowService>();
         auto controller = std::make_unique<DeviceCenterController>(nullptr,service);
