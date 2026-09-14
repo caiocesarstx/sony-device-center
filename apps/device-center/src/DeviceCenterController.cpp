@@ -62,6 +62,7 @@ void DeviceCenterController::_applySnapshot(const QByteArray& data) {
     const auto s = QJsonDocument::fromJson(data).object();
     _connected = s.value("connected").toBool();
     _connectionState = s.value("connectionState").toString("disconnected");
+    if (_connectionState == "selection_required") _lastError = s.value("lastError").toString();
     _maxAmbientLevel = s.value("maxAmbientLevel").toInt(20);
     if (s.contains("name")) _deviceName = s.value("name").toString();
     if (s.contains("address")) _deviceAddress = s.value("address").toString();

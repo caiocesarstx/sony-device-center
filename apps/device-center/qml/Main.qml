@@ -24,11 +24,28 @@ ApplicationWindow {
             wrapMode: Text.Wrap
             color: controller.lastError.length ? window.danger : window.txtDim
             text: controller.lastError.length ? controller.lastError :
+                controller.connectionState === "connecting" ? "Connecting to " + connectionTarget() + "…" :
                 controller.busy ? "Working…" : "Connection: " + controller.connectionState
         }
     }
 
     property int navIndex: 0
+    function connectionTarget() {
+        for (var i = 0; i < controller.pairedDevices.length; ++i) {
+            var device = controller.pairedDevices[i]
+            if (device.address === controller.deviceAddress) return device.name
+        }
+        return controller.deviceAddress
+    }
+    Connections {
+        target: controller
+        property bool selectionShown: false
+        function onStateChanged() {
+            var needsSelection = controller.connectionState === "selection_required"
+            if (needsSelection && !selectionShown) window.navIndex = 4
+            selectionShown = needsSelection
+        }
+    }
 
     // Reactive i18n helper
     function tr(key) {

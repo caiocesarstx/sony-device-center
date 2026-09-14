@@ -206,3 +206,44 @@ TEST_CASE("IPC refuses insecure paths and recovers an owned stale socket", "[cor
     }
 }
 #endif
+
+TEST_CASE("Preferred connection skips unrelated offline devices and stops after failure", "[core][preferred]") {
+    auto transport = std::make_shared<ReplyTransport>();
+    auto discovery = std::make_shared<FakeDeviceDiscovery>();
+    const std::string remembered = "33:22:33:44:55:66";
+    discovery->setDevices({{"WH-1000XM5",DeviceAddress("11:22:33:44:55:66"),true,false},
+        {"WH-1000XM5",DeviceAddress("22:22:33:44:55:66"),true,true},
+        {"WH-1000XM5",DeviceAddress(remembered),true,false}});
+    DeviceService service(transport, discovery);
+    transport->failAddress = "22:22:33:44:55:66";
+    service.startPreferredConnect(remembered);
+    for (int i=0; i<6; ++i) service.tick();
+    REQUIRE(transport->attempts == std::vector<std::string>{"22:22:33:44:55:66",remembered});
+    REQUIRE(service.isConnected());
+    service.disconnect();
+    transport->attempts.clear();
+    discovery->setDevices({{"WH-1000XM5",DeviceAddress(remembered),true,true}});
+    transport->failAddress = remembered;
+    service.startPreferredConnect(remembered);
+    for (int i=0; i<10; ++i) service.tick();
+    CHECK(transport->attempts == std::vector<std::string>{remembered});
+    CHECK(service.connectionState() == "selection_required");
+    CHECK_FALSE(service.lastError().empty());
+}
+
+TEST_CASE("Preferred connection prioritizes the connected remembered headset", "[core][preferred]") {
+    auto transport = std::make_shared<ReplyTransport>();
+    auto discovery = std::make_shared<FakeDeviceDiscovery>();
+    discovery->setDevices({{"WH-1000XM5",DeviceAddress("11:22:33:44:55:66"),true,true},
+        {"WH-1000XM5",DeviceAddress("22:22:33:44:55:66"),true,true}});
+    DeviceService service(transport, discovery);
+    const auto response = JsonProtocol::execute({{"version",1},{"id",1},{"method","preferredConnect"},
+        {"params",{{"address","22:22:33:44:55:66"}}}},service);
+    REQUIRE(response["ok"] == true);
+    service.tick();
+    CHECK(transport->attempts.empty());
+    CHECK(service.connectionState() == "connecting");
+    CHECK(service.selectedAddress() == "22:22:33:44:55:66");
+    service.tick();
+    CHECK(transport->attempts == std::vector<std::string>{"22:22:33:44:55:66"});
+}

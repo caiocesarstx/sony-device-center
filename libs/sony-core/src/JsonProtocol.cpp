@@ -59,6 +59,10 @@ Json JsonProtocol::execute(const Json& request, IDeviceService& service) {
         if (!params.is_object()) throw std::invalid_argument("params must be an object");
         Json data;
         if (method == "snapshot") data = snapshot(service);
+        else if (method == "preferredConnect") {
+            service.startPreferredConnect(params.value("address", std::string{}));
+            data = snapshot(service);
+        }
         else if (method == "devices") {
             data = Json::array();
             for (const auto& d : service.discoverDevices())
